@@ -15,10 +15,9 @@ Once the connection is established, the plugin can perform the following actions
 - ask to be connected to another plugin (by name). If the other plugin accepts, both of them are given
   - a bidirectional, byte-oriented communication channel to the other plugin
     - with an explicit, credit-based backpressure mechanism
+    - with heartbeats
     - either plugin is allowed to close/cancel it
     - plugins can use any protocol they like to communicate
-  - a bidirectional channel over which the plugin can send heartbeat pings and receive heartbeat pongs
-  - a bidirectional channel over which the plugin receives hearbeat pings and can send back heartbeat pongs
 - disconnect
 
 ## Implementation
@@ -33,11 +32,11 @@ Initially, the server does nothing but wait for the plugin to send its registrat
 
 After sending the registration message, a plugin can send any of the following to the server:
 
-### Diconnection Message
+### Disconnection Message
 
 The plugin sends a message with a zero-length payload. This is not strictly necessary, the plugin can instead directly terminate the underlying connection. But in case of connection types where this can not be directly detected by the server, it is polite to send this message prior to disconnecting.
 
-Upon receiving this message, the server does all the cleanup necessary for disconnected plugins (see section "Server Bahavior Upon Plugin Disconnection")
+Upon receiving this message, the server does all the cleanup necessary for disconnected plugins (see section "Server Behavior Upon Plugin Disconnection")
 
 ### Connection Query
 
@@ -50,17 +49,17 @@ If a plugin opens a `connection stream` while it still has another one open, the
 
 ### Connect to Plugin
 
-For plugin `a` to establish a connection to plugin `b`, plugin `a` opens a duplex with a payload consisting of the byte `0000_0000` followed by `<length_uint8><name>` of plugin `b`. If `a` has already established a connection to `b` that hasn't been closed/canceled in both direction, the server must directly cancel and close the duplex with a zero-length payload. Else, the server must allocate enough memory for two 64 bit integers and two buffers of bytes for caching data, each of size at least one byte. If it fails to do so, it must both close and cancel the duplex with the byte `0000_0000` as the payload. If memory allocation suceeded, the server then opens a duplex to plugin `b`, with a payload consisting of the byte `0000_0000` followed by the `<length_uint8><name><version_uint16>` of plugin `a`.
+For plugin `a` to establish a connection to plugin `b`, plugin `a` opens a duplex with a payload consisting of the byte `0000_0000` followed by `<length_uint8><name>` of plugin `b`. If `a` has already established a connection to `b` that hasn't been closed/canceled in both direction, the server must directly cancel and close the duplex with a zero-length payload. Else, the server must allocate enough memory for two 64 bit integers and two buffers of bytes for caching data, each of size at least one byte. If it fails to do so, it must both close and cancel the duplex with the byte `0000_0000` as the payload. If memory allocation succeeded, the server then opens a duplex to plugin `b`, with a payload consisting of the byte `0000_0000` followed by the `<length_uint8><name><version_uint16>` of plugin `a`.
 
 All pings sent by `a` get relayed along that channel. All credit given by `a` is buffered into one of the 64 bit integer the server allocated. Likewise, pings by `b` are forwarded and credit given by `b` is buffered as well.
 
 Plugin `b` can deny the connection by closing and cancelling the duplex with a zero-length payload. In that case, the server must close and cancel the duplex with `a` with the byte `0000_0001` as the payload. Plugin `b` can accept the connection by sending a zero-length message down the duplex. In that case, the server must send a zero-length message down the duplex it shared with `a`. It then sends all buffered credit to `a` and `b` respectively. The logical connection between `a` and `b` is now established, consisting of the two duplexes.
 
-After the connection has been established, the server forwards all messages, hearbeat pings, heartbeat pongs, and credit along the duplexes. To the plugins, this looks like a direct connection between them. There is a situation however where the server may choose to not directly relay all credit. Imagine a setting where there is a very fast connection between `a` and the server, but a very slow connection between the server and `b`. Furthermore assume that `b` gives a lot of credit to `a`. `a` sends a lot of data, but the server can not relay it fast enough to `b`, so it has to buffer data. In this setting, `b` would effectively determine how much data the server has to buffer. To prevent this, the server can simply put an upper limit to the credit it hands to `a`, and store any excess credit given by `b` in one of the 64 bit integers. When more data could be sent from the server to `b`, it can then send more credit to `a`, removing it from the 64 bit integer. The server should use a scheme that is more efficient than sending credit whenever data could be sent, as that might result in a lot of credit data being transmitted.
+After the connection has been established, the server forwards all messages, heartbeat pings, heartbeat pongs, and credit along the duplexes. To the plugins, this looks like a direct connection between them. There is a situation however where the server may choose to not directly relay all credit. Imagine a setting where there is a very fast connection between `a` and the server, but a very slow connection between the server and `b`. Furthermore assume that `b` gives a lot of credit to `a`. `a` sends a lot of data, but the server can not relay it fast enough to `b`, so it has to buffer data. In this setting, `b` would effectively determine how much data the server has to buffer. To prevent this, the server can simply put an upper limit to the credit it hands to `a`, and store any excess credit given by `b` in one of the 64 bit integers. When more data could be sent from the server to `b`, it can then send more credit to `a`, removing it from the 64 bit integer. The server should use a scheme that is more efficient than sending credit whenever data could be sent, as that might result in a lot of credit data being transmitted.
 
 If one of the plugins cancels/closes parts of the connection, the server prepends a byte `0000_0000` to the payload before relaying it.
 
-### Server Bahavior Upon Plugin Disconnection
+### Server Behavior Upon Plugin Disconnection
 When plugin `foo` sends a disconnection message, or the connection to the server is closed or errors, the server must perform the following cleanup work (only once per plugin):
 
 - notify all connection streams
